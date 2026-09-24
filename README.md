@@ -4,7 +4,7 @@ An [Agent Skill](https://agentskills.io/specification) that helps B2C founders d
 which topics to build next and which languages to launch in, using
 [Wikimedia pageview data](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/reference/page-views.html).
 
-> Work in progress: the full flow works (topic → data → analysis → one-page PDF). Next: end-to-end testing on Claude Haiku 4.5.
+> Status: the full flow works (topic → data → analysis → one-page PDF) and is tested end to end on Claude Haiku 4.5, see [evals](wiki-interest/evals/README.md).
 
 ## Examples
 
@@ -19,6 +19,7 @@ wiki-interest/          the skill (copy this folder into your agent's skills dir
   scripts/              TypeScript CLI, run directly by Node 22.18+ (no build step)
   references/           methodology the agent reads only when needed
   tests/                unit tests for the offline logic (node:test)
+  evals/                end-to-end runs on Claude Haiku 4.5: cases, runner, graded results
 ```
 
 ## Quick start

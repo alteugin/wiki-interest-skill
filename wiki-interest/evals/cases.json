@@ -1,0 +1,58 @@
+[
+  {
+    "id": "fasting-pl-cs",
+    "note": "Task example 1. Polish Wikipedia has no article on intermittent fasting: the agent must say so, not invent Polish numbers.",
+    "prompt": "Compare the growth of interest in intermittent fasting in Polish and Czech Wikipedia over the last two years. Prepare a short PDF report.",
+    "mustMention": [
+      "(\\bno\\b|n't have|not have|missing|lacks|without).{0,40}(article|coverage)|article.{0,40}(missing|does not exist|doesn't exist)"
+    ],
+    "expectReport": true
+  },
+  {
+    "id": "astronomy-uk-trust",
+    "note": "Task example 2. Real decline with high confidence; the answer should say how far to trust it.",
+    "prompt": "We're thinking about adding an astronomy course to our education app. Is interest in this topic growing in Ukrainian Wikipedia, and how much can this growth be trusted? Make a one-page PDF report I can share with the team.",
+    "mustMention": [
+      "declin|fall|fell|drop|decreas",
+      "confidence|trust|reliab"
+    ],
+    "expectReport": true,
+    "followUp": {
+      "prompt": "Thanks. Now compare the same topic in Polish and Czech too, over the last 3 years, and update the report.",
+      "mustMention": [
+        "Polish|pl\\b",
+        "Czech|cs\\b",
+        "2023|three years|3 years|3-year"
+      ],
+      "expectReport": true
+    }
+  },
+  {
+    "id": "english-learning-langs",
+    "note": "Task example 3. Topic choice matters: 'learning English' is not the same article as 'English language'. Languages given by the user.",
+    "prompt": "We're building a language-learning app. Compare interest in learning English across the Ukrainian, Polish, Turkish, Portuguese and Vietnamese Wikipedias and prepare a short report: which audiences should we research next and why?",
+    "mustMention": [
+      "Turkish|Portuguese|Vietnamese|Ukrainian|Polish",
+      "English[- ]language|proxy|closest|broader"
+    ],
+    "expectReport": true
+  },
+  {
+    "id": "mercury-ambiguous",
+    "note": "Ambiguous topic. With no user to ask, the agent must state which meaning it picked (or ask), not silently guess.",
+    "prompt": "Is interest in Mercury growing in German and French Wikipedia?",
+    "mustMention": [
+      "planet|element|god|which|meaning|ambiguous|assum"
+    ],
+    "expectReport": false
+  },
+  {
+    "id": "ukrainian-query",
+    "note": "Query written in Ukrainian: topic resolution needs --search-lang uk (or an English translation).",
+    "prompt": "Чи зростає інтерес до програмування в україномовній Вікіпедії за останні два роки?",
+    "mustMention": [
+      "програмуванн|programming"
+    ],
+    "expectReport": false
+  }
+]

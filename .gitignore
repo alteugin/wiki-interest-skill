@@ -3,3 +3,4 @@ node_modules/
 wiki-interest-output/
 .DS_Store
 .env
+.eval-runs/
