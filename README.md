@@ -109,8 +109,10 @@ is defined, the agent writing the headline answer while code checks its
 numbers), and the agent wrote most of the code. I didn't take its output on
 trust. Each layer was checked against something independent of the model:
 
-- **Data:** numbers compared with Wikimedia's own
-  [pageviews tool](https://pageviews.wmcloud.org).
+- **Data:** spot-checked against Wikimedia's own
+  [pageviews tool](https://pageviews.wmcloud.org): 24-month human pageviews for
+  "Астрономія" (uk) and "Astronomia" (pl), Sep 2024 – Aug 2026, match exactly
+  (23,322 and 37,652).
 - **Logic:** unit tests on synthetic series with known answers (seasonality,
   spikes, Wikipedia-wide decline); rules were broken on purpose to make sure a
   test fails. One test passed without the fix it was written for, and was redone.
