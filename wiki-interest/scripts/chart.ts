@@ -23,6 +23,13 @@ const PALETTE = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#000000", "#D55E00
 
 export const CHART_FONT = "DejaVu Sans";
 
+/** "2025-09-01" shifted by n days, as an ISO date. */
+function shiftDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * Monthly interest per language, normalized to views per million views of the
  * whole language edition, so small and large Wikipedias share one axis.
@@ -38,14 +45,31 @@ export function chartSpec(series: ChartSeries[], opts: ChartOptions = {}): TopLe
   });
 
   const langs = series.map((s) => s.lang);
+  const months = rows.map((r) => r.month).sort();
+  // Points sit on the 1st of each month; pad half a month on both sides so the
+  // first and last points aren't glued to the edges and the shading below can
+  // start and end exactly between months.
+  const domain = months.length ? [shiftDays(months[0]!, -15), shiftDays(months.at(-1)!, 15)] : undefined;
+
   const layers: TopLevelSpec[] = [];
   if (opts.highlight) {
+    const band = { from: shiftDays(`${opts.highlight.from}-01`, -15), to: shiftDays(`${opts.highlight.to}-01`, 15) };
     layers.push({
-      data: { values: [{ from: `${opts.highlight.from}-01`, to: `${opts.highlight.to}-28` }] },
-      mark: { type: "rect", color: "#f1f1f1" },
+      data: { values: [band] },
+      // Translucent so the grid stays visible through it.
+      mark: { type: "rect", color: "#dfe6ee", opacity: 0.45 },
       encoding: {
         x: { field: "from", type: "temporal" },
         x2: { field: "to" },
+      },
+    } as unknown as TopLevelSpec);
+    layers.push({
+      data: { values: [{ ...band, label: "last 12 months" }] },
+      mark: { type: "text", align: "left", baseline: "top", dx: 4, dy: 4, fontSize: 8, color: "#6b7785" },
+      encoding: {
+        x: { field: "from", type: "temporal" },
+        y: { value: 0 },
+        text: { field: "label" },
       },
     } as unknown as TopLevelSpec);
   }
@@ -53,7 +77,13 @@ export function chartSpec(series: ChartSeries[], opts: ChartOptions = {}): TopLe
     data: { values: rows },
     mark: { type: "line", point: { size: 14 }, strokeWidth: 1.8 },
     encoding: {
-      x: { field: "month", type: "temporal", title: null, axis: { format: "%b %y", labelAngle: 0, tickCount: 8 } },
+      x: {
+        field: "month",
+        type: "temporal",
+        title: null,
+        axis: { format: "%b %y", labelAngle: 0, tickCount: 8 },
+        ...(domain ? { scale: { domain } } : {}),
+      },
       y: { field: "perMillion", type: "quantitative", title: "views per million edition views" },
       color: {
         field: "lang",
