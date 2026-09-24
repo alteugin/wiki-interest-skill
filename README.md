@@ -6,6 +6,11 @@ which topics to build next and which languages to launch in, using
 
 > Work in progress: the full flow works (topic → data → analysis → one-page PDF). Next: end-to-end testing on Claude Haiku 4.5.
 
+## Examples
+
+- [Astronomy in Ukrainian, Polish, Czech](examples/astronomy-uk-pl-cs.pdf)
+- [Intermittent fasting in 8 languages](examples/intermittent-fasting-8-languages.pdf) (largest report; Polish has no article)
+
 ## Layout
 
 ```
