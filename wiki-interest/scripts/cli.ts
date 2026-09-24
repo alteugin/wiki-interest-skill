@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -9,6 +9,7 @@ import {
   type Point,
   projectViews,
 } from "./pageviews.ts";
+import { analyzeLang, compareLangs, type LangAnalysis, type LangInput, RULES } from "./analyze.ts";
 import { resolveQid, resolveTopic } from "./wikidata.ts";
 
 const USAGE = `wiki-interest: Wikipedia pageview trends per topic and language.
@@ -23,6 +24,11 @@ All commands print JSON to stdout.
         [--granularity monthly|daily] [--out-dir ./wiki-interest-output]
       Downloads human pageviews for each article plus the whole-language
       baseline, saves a dataset file and prints a compact summary with its path.
+
+  analyze --dataset <path from fetch>
+      Direction (growing/flat/declining), year-over-year change, change in share
+      of the language edition, confidence (high/medium/low) with caveats, spikes,
+      and a cross-language comparison. Saves <dataset>.analysis.json.
 `;
 
 class UsageError extends Error {}
@@ -129,6 +135,44 @@ async function cmdFetch(values: Record<string, string | undefined>): Promise<voi
   });
 }
 
+interface Dataset {
+  schema: string;
+  topic: { qid: string; label: string; description: string };
+  range: { from: string; to: string; granularity: string };
+  missingLangs: string[];
+  langs: Record<string, LangInput & { title: string }>;
+}
+
+async function cmdAnalyze(values: Record<string, string | undefined>): Promise<void> {
+  if (!values.dataset) throw new UsageError("--dataset is required: the path printed by fetch.");
+  let dataset: Dataset;
+  try {
+    dataset = JSON.parse(await readFile(values.dataset, "utf8")) as Dataset;
+  } catch {
+    throw new UsageError(`Cannot read dataset ${values.dataset}. Use the exact "dataset" path printed by fetch.`);
+  }
+  if (dataset.schema !== "wiki-interest/dataset@1") throw new UsageError("Not a wiki-interest dataset file.");
+
+  const langs: Record<string, LangAnalysis & { title: string }> = {};
+  for (const [lang, data] of Object.entries(dataset.langs)) {
+    langs[lang] = { title: data.title, ...analyzeLang(data) };
+  }
+  const analysis = {
+    schema: "wiki-interest/analysis@1",
+    dataset: path.resolve(values.dataset),
+    topic: dataset.topic,
+    range: dataset.range,
+    missingLangs: dataset.missingLangs,
+    langs,
+    comparison: compareLangs(langs),
+    rules: RULES,
+  };
+  const file = values.dataset.replace(/\.json$/, "") + ".analysis.json";
+  await writeFile(file, JSON.stringify(analysis, null, 2));
+  const { rules: _rules, ...compact } = analysis;
+  print({ analysis: path.resolve(file), ...compact });
+}
+
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
@@ -141,6 +185,7 @@ async function main(): Promise<void> {
       to: { type: "string" },
       granularity: { type: "string" },
       "out-dir": { type: "string" },
+      dataset: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -156,6 +201,8 @@ async function main(): Promise<void> {
       return cmdResolve(rest, opts);
     case "fetch":
       return cmdFetch(opts);
+    case "analyze":
+      return cmdAnalyze(opts);
     default:
       throw new UsageError(`Unknown command "${command}".`);
   }

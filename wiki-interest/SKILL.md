@@ -51,6 +51,31 @@ Every command prints JSON. On failure it prints `{"error": ...}` and exits 1.
    point. Pass that path to later steps instead of refetching. Results are cached,
    so rerunning with other languages or ranges is cheap.
 
+3. **Analyze** the dataset:
+
+   ```bash
+   node scripts/cli.ts analyze --dataset <dataset path from fetch>
+   ```
+
+   Per language you get `verdict` (one line, quote it), `direction`,
+   `confidence`, `caveats`, `spikes`, plus `comparison` across languages.
+
+## Reading the analysis
+
+- Lead with `direction` + `confidence`, then the numbers. Always pass on every
+  item in `caveats`; they are the reasons confidence is not high.
+- `change`: raw human views, last 12 months vs the 12 before (seasonality cancels out).
+- `shareChange`: the same but as a share of all views in that language edition.
+  If it disagrees with `change`, the move is mostly Wikipedia-wide traffic, not the topic.
+- `medianMonthlyChange` and `consistency` ("9/12"): is the change broad-based
+  or a couple of months? Spikes (news, viral moments) are listed in `spikes`.
+- Across languages, rank with `viewsPerMillion` (interest level, size-adjusted)
+  and `change` (momentum). Never rank by raw views.
+- `confidence: low` means "not enough evidence", not "declining". Say what would
+  raise it (longer range, related articles, other data sources).
+- Why the rules are what they are: [references/methodology.md](references/methodology.md).
+  Read it only if the user questions the method.
+
 ## Language codes
 
 Wikipedia codes, not country codes: `uk` Ukrainian, `pl` Polish, `cs` Czech,
