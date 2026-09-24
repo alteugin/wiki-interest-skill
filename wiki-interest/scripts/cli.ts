@@ -10,25 +10,33 @@ import {
   projectViews,
 } from "./pageviews.ts";
 import { analyzeLang, compareLangs, type LangAnalysis, type LangInput, RULES } from "./analyze.ts";
+import { chartSpec, renderSvg } from "./chart.ts";
+import { langName, MAX_REPORT_LANGS, renderReport } from "./report.ts";
+import { checkSummary } from "./verify.ts";
 import { resolveQid, resolveTopic } from "./wikidata.ts";
 
 const USAGE = `wiki-interest: Wikipedia pageview trends per topic and language.
-All commands print JSON to stdout.
+All commands print JSON to stdout. Typical flow: run, then report.
 
-  resolve <topic> --langs uk,pl,cs [--search-lang en]
-  resolve --qid Q333 --langs uk,pl,cs
+  run <topic> --langs uk,pl,cs [--search-lang en] [--months 24 | --from YYYY-MM --to YYYY-MM]
+  run --qid Q333 --langs uk,pl,cs
+      resolve + fetch + analyze in one step. Stops with status "ambiguous" or
+      "not_found" if the topic needs clarifying.
+
+  report --analysis <path> --summary "<2-4 sentence answer>" [--question "<user question>"]
+      One-page PDF + SVG chart. Every number in --summary must come from the
+      analysis, otherwise the summary is rejected with the allowed values.
+
+  Individual steps (for follow-ups or to take control):
+  resolve <topic> --langs uk,pl,cs [--search-lang en] | resolve --qid Q333 --langs ...
       Topic -> Wikidata item (QID) -> article title in each language.
-      status "ambiguous" returns candidates: pick one and pass its --qid.
+  fetch --qid Q333 --langs uk,pl,cs [--months 24 | --from --to] [--granularity monthly|daily]
+      Human pageviews per article + whole-language baseline -> dataset file.
+  analyze --dataset <path>
+      Direction, year-over-year change, share change, confidence + caveats,
+      spikes, cross-language comparison -> analysis file.
 
-  fetch --qid Q333 --langs uk,pl,cs [--months 24 | --from YYYY-MM --to YYYY-MM]
-        [--granularity monthly|daily] [--out-dir ./wiki-interest-output]
-      Downloads human pageviews for each article plus the whole-language
-      baseline, saves a dataset file and prints a compact summary with its path.
-
-  analyze --dataset <path from fetch>
-      Direction (growing/flat/declining), year-over-year change, change in share
-      of the language edition, confidence (high/medium/low) with caveats, spikes,
-      and a cross-language comparison. Saves <dataset>.analysis.json.
+  Common: --out-dir <dir> (default ./wiki-interest-output)
 `;
 
 class UsageError extends Error {}
@@ -76,44 +84,56 @@ async function cmdResolve(positionals: string[], values: Record<string, string |
   print(await resolveTopic(query, langs, values["search-lang"] ?? "en"));
 }
 
-async function cmdFetch(values: Record<string, string | undefined>): Promise<void> {
-  if (!values.qid) throw new UsageError("--qid is required. Run resolve first to get it.");
+interface FetchOptions {
+  qid: string;
+  langs: string[];
+  from: string;
+  to: string;
+  granularity: Granularity;
+  outDir: string;
+}
+
+function fetchOptions(values: Record<string, string | undefined>, qid: string | undefined): FetchOptions {
+  if (!qid) throw new UsageError("--qid is required. Run resolve first to get it.");
   const langs = parseLangs(values.langs);
   const { from, to } = parseRange(values);
   const granularity = (values.granularity ?? "monthly") as Granularity;
   if (granularity !== "monthly" && granularity !== "daily") throw new UsageError("--granularity must be monthly or daily.");
+  return { qid, langs, from, to, granularity, outDir: path.resolve(values["out-dir"] ?? "wiki-interest-output") };
+}
 
-  const topic = await resolveQid(values.qid, langs);
-  const present = langs.filter((l) => topic.articles[l]);
+async function fetchDataset(o: FetchOptions) {
+  const topic = await resolveQid(o.qid, o.langs);
+  const present = o.langs.filter((l) => topic.articles[l]);
 
   const series = await Promise.all(
     present.map(async (lang) => {
       const article = topic.articles[lang]!;
       const [articlePoints, projectPoints] = await Promise.all([
-        articleViews(lang, article.title, from, to, granularity),
-        projectViews(lang, from, to, granularity),
+        articleViews(lang, article.title, o.from, o.to, o.granularity),
+        projectViews(lang, o.from, o.to, o.granularity),
       ]);
       return [lang, { ...article, article: articlePoints, project: projectPoints }] as const;
     }),
   );
 
-  const dataset = {
+  const dataset: Dataset = {
     schema: "wiki-interest/dataset@1",
     topic: { qid: topic.qid, label: topic.label, description: topic.description },
-    range: { from, to, granularity },
+    range: { from: o.from, to: o.to, granularity: o.granularity },
     fetchedAt: new Date().toISOString(),
     source: "Wikimedia Pageviews API (agent=user, all-access). Views of the exact article title; redirects are not included.",
     missingLangs: topic.missingLangs,
     langs: Object.fromEntries(series),
   };
 
-  const outDir = path.resolve(values["out-dir"] ?? "wiki-interest-output", "data");
-  await mkdir(outDir, { recursive: true });
-  const file = path.join(outDir, `${topic.qid}_${present.join("-") || "none"}_${from}_${to}_${granularity}.json`);
+  const dir = path.join(o.outDir, "data");
+  await mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${topic.qid}_${present.join("-") || "none"}_${o.from}_${o.to}_${o.granularity}.json`);
   await writeFile(file, JSON.stringify(dataset, null, 2));
 
   // Keep stdout small: the agent needs the shape of the data, not every point.
-  print({
+  const summary = {
     status: present.length ? "ok" : "no_articles",
     dataset: file,
     topic: dataset.topic,
@@ -132,34 +152,54 @@ async function cmdFetch(values: Record<string, string | undefined>): Promise<voi
         },
       ]),
     ),
-  });
+  };
+  return { file, dataset, summary };
+}
+
+async function cmdFetch(values: Record<string, string | undefined>): Promise<void> {
+  print((await fetchDataset(fetchOptions(values, values.qid))).summary);
 }
 
 interface Dataset {
   schema: string;
   topic: { qid: string; label: string; description: string };
   range: { from: string; to: string; granularity: string };
+  fetchedAt: string;
+  source: string;
   missingLangs: string[];
-  langs: Record<string, LangInput & { title: string }>;
+  langs: Record<string, LangInput & { title: string; url: string }>;
 }
 
-async function cmdAnalyze(values: Record<string, string | undefined>): Promise<void> {
-  if (!values.dataset) throw new UsageError("--dataset is required: the path printed by fetch.");
-  let dataset: Dataset;
-  try {
-    dataset = JSON.parse(await readFile(values.dataset, "utf8")) as Dataset;
-  } catch {
-    throw new UsageError(`Cannot read dataset ${values.dataset}. Use the exact "dataset" path printed by fetch.`);
-  }
-  if (dataset.schema !== "wiki-interest/dataset@1") throw new UsageError("Not a wiki-interest dataset file.");
+interface Analysis {
+  schema: string;
+  dataset: string;
+  topic: Dataset["topic"];
+  range: Dataset["range"];
+  missingLangs: string[];
+  langs: Record<string, LangAnalysis & { title: string }>;
+  comparison: ReturnType<typeof compareLangs>;
+  rules: typeof RULES;
+}
 
-  const langs: Record<string, LangAnalysis & { title: string }> = {};
+async function readJson<T extends { schema: string }>(file: string, schema: string, what: string): Promise<T> {
+  let data: T;
+  try {
+    data = JSON.parse(await readFile(file, "utf8")) as T;
+  } catch {
+    throw new UsageError(`Cannot read ${what} ${file}. Use the exact path printed by the previous command.`);
+  }
+  if (data.schema !== schema) throw new UsageError(`${file} is not a wiki-interest ${what} file.`);
+  return data;
+}
+
+async function analyzeDataset(datasetFile: string, dataset: Dataset) {
+  const langs: Analysis["langs"] = {};
   for (const [lang, data] of Object.entries(dataset.langs)) {
     langs[lang] = { title: data.title, ...analyzeLang(data) };
   }
-  const analysis = {
+  const analysis: Analysis = {
     schema: "wiki-interest/analysis@1",
-    dataset: path.resolve(values.dataset),
+    dataset: path.resolve(datasetFile),
     topic: dataset.topic,
     range: dataset.range,
     missingLangs: dataset.missingLangs,
@@ -167,10 +207,105 @@ async function cmdAnalyze(values: Record<string, string | undefined>): Promise<v
     comparison: compareLangs(langs),
     rules: RULES,
   };
-  const file = values.dataset.replace(/\.json$/, "") + ".analysis.json";
+  const file = path.resolve(datasetFile.replace(/\.json$/, "") + ".analysis.json");
   await writeFile(file, JSON.stringify(analysis, null, 2));
-  const { rules: _rules, ...compact } = analysis;
-  print({ analysis: path.resolve(file), ...compact });
+  const { rules: _rules, dataset: _dataset, ...compact } = analysis;
+  return { file, analysis, compact };
+}
+
+async function cmdAnalyze(values: Record<string, string | undefined>): Promise<void> {
+  if (!values.dataset) throw new UsageError("--dataset is required: the path printed by fetch.");
+  const dataset = await readJson<Dataset>(values.dataset, "wiki-interest/dataset@1", "dataset");
+  const { file, compact } = await analyzeDataset(values.dataset, dataset);
+  print({ analysis: file, ...compact });
+}
+
+const REPORT_HINT =
+  "Write a 2-4 sentence answer to the user's question using only numbers from this output, then run: " +
+  'report --analysis <analysis path> --summary "<answer>" --question "<user question>"';
+
+async function cmdRun(positionals: string[], values: Record<string, string | undefined>): Promise<void> {
+  const langs = parseLangs(values.langs);
+  let qid = values.qid;
+  let alternatives: { qid: string; label: string; description: string }[] = [];
+  if (!qid) {
+    const query = positionals.join(" ").trim();
+    if (!query) throw new UsageError('Give a topic (run "astronomy" ...) or --qid.');
+    const resolved = await resolveTopic(query, langs, values["search-lang"] ?? "en");
+    if (resolved.status !== "ok") {
+      // Stop and let the agent (or the user) choose; never guess the meaning.
+      print(resolved);
+      return;
+    }
+    qid = resolved.topic.qid;
+    alternatives = resolved.alternatives.map(({ qid, label, description }) => ({ qid, label, description }));
+  }
+  const fetched = await fetchDataset(fetchOptions(values, qid));
+  if (fetched.summary.status !== "ok") {
+    print({ ...fetched.summary, hint: "None of these languages has an article on this topic. Try a broader topic or other languages." });
+    return;
+  }
+  const { file, compact } = await analyzeDataset(fetched.file, fetched.dataset);
+  print({
+    status: "ok",
+    analysis: file,
+    ...compact,
+    ...(alternatives.length ? { otherMeanings: alternatives } : {}),
+    next: REPORT_HINT,
+  });
+}
+
+async function cmdReport(values: Record<string, string | undefined>): Promise<void> {
+  if (!values.analysis) throw new UsageError("--analysis is required: the path printed by analyze or run.");
+  if (!values.summary) throw new UsageError("--summary is required: your 2-4 sentence answer, citing numbers from the analysis.");
+  const analysis = await readJson<Analysis>(values.analysis, "wiki-interest/analysis@1", "analysis");
+  const langCount = Object.keys(analysis.langs).length;
+  if (langCount === 0) throw new UsageError("The analysis has no languages with data; nothing to report.");
+  if (langCount > MAX_REPORT_LANGS) {
+    throw new UsageError(`A one-page report fits up to ${MAX_REPORT_LANGS} languages; this analysis has ${langCount}. Fetch fewer languages.`);
+  }
+
+  const check = checkSummary(values.summary, analysis.langs, analysis.range);
+  if (!check.ok) {
+    print({
+      error: "Summary rejected: every number must come from the analysis.",
+      problems: check.problems,
+      unsupported: check.unsupported,
+      allowed: check.allowed,
+      hint: "Rewrite the summary using the allowed values (rounding is fine) or describe the trend without numbers, then rerun report.",
+    });
+    process.exit(1);
+  }
+
+  const dataset = await readJson<Dataset>(analysis.dataset, "wiki-interest/dataset@1", "dataset");
+  const firstLang = Object.values(analysis.langs)[0]!;
+  const chartSvg = await renderSvg(
+    chartSpec(
+      Object.entries(dataset.langs).map(([lang, d]) => ({ lang: `${langName(lang)} (${lang})`, article: d.article, project: d.project })),
+      { highlight: firstLang.method === "year_over_year" ? firstLang.recentPeriod : undefined },
+    ),
+  );
+
+  const outDir = path.resolve(values["out-dir"] ?? path.join(path.dirname(analysis.dataset), ".."), "reports");
+  await mkdir(outDir, { recursive: true });
+  const base = path.basename(analysis.dataset).replace(/\.json$/, "");
+  const chartFile = path.join(outDir, `${base}.chart.svg`);
+  const pdfFile = path.join(outDir, `${base}.pdf`);
+  await writeFile(chartFile, chartSvg);
+  await renderReport(
+    {
+      topic: analysis.topic,
+      range: analysis.range,
+      question: values.question,
+      summary: values.summary.trim(),
+      chartSvg,
+      langs: analysis.langs,
+      missingLangs: analysis.missingLangs,
+      analysisFile: values.analysis,
+    },
+    pdfFile,
+  );
+  print({ status: "ok", pdf: pdfFile, chart: chartFile });
 }
 
 async function main(): Promise<void> {
@@ -186,6 +321,9 @@ async function main(): Promise<void> {
       granularity: { type: "string" },
       "out-dir": { type: "string" },
       dataset: { type: "string" },
+      analysis: { type: "string" },
+      summary: { type: "string" },
+      question: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -197,12 +335,16 @@ async function main(): Promise<void> {
     return;
   }
   switch (command) {
+    case "run":
+      return cmdRun(rest, opts);
     case "resolve":
       return cmdResolve(rest, opts);
     case "fetch":
       return cmdFetch(opts);
     case "analyze":
       return cmdAnalyze(opts);
+    case "report":
+      return cmdReport(opts);
     default:
       throw new UsageError(`Unknown command "${command}".`);
   }

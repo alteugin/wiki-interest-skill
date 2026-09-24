@@ -1,9 +1,9 @@
 ---
 name: wiki-interest
-description: Measures and compares public interest in topics across Wikipedia language editions using Wikimedia pageview data. Use when a user asks whether interest in a topic is growing, wants to compare a topic across languages or countries, or needs data to decide which course, topic, market or localization language a B2C product should invest in next.
+description: Measures and compares public interest in topics across Wikipedia language editions using Wikimedia pageview data, and produces a one-page PDF report with a chart. Use when a user asks whether interest in a topic is growing, wants to compare a topic across languages or countries, or needs data to decide which course, topic, market or localization language a B2C product should invest in next.
 compatibility: Requires Node.js 22.18+ and internet access to wikidata.org and wikimedia.org.
 metadata:
-  version: "0.1"
+  version: "0.2"
 ---
 
 # wiki-interest
@@ -14,79 +14,97 @@ pageviews. All numbers come from the CLI. Never estimate or invent view counts.
 ## Setup (once)
 
 ```bash
-cd <skill-dir> && npm ci
+npm ci --prefix <skill-dir>
 ```
 
-Run commands from the skill directory: `node scripts/cli.ts <command>`.
-Every command prints JSON. On failure it prints `{"error": ...}` and exits 1.
+Run commands from the user's working directory, so outputs land there
+(in `./wiki-interest-output/`):
 
-## Workflow
+```bash
+node <skill-dir>/scripts/cli.ts <command> ...
+```
 
-1. **Resolve the topic** into a Wikidata item (QID). Article titles differ per
-   language, so never guess titles yourself.
+Every command prints JSON. On failure it prints `{"error": ...}` and exits 1;
+read the error, fix the arguments, retry.
 
-   ```bash
-   node scripts/cli.ts resolve "intermittent fasting" --langs pl,cs
-   ```
+## Standard flow: two commands
 
-   - `status: "ok"`: use `topic.qid`. Check `topic.description` matches what the user meant.
-   - `status: "ambiguous"`: several meanings (e.g. "Mercury": planet / element / god).
-     Pick from `candidates` by description, or ask the user if intent is unclear.
-   - `status: "not_found"`: retry with the English term or `--search-lang <lang>`
-     for a query written in another language (e.g. `--search-lang uk`).
-   - `missingLangs`: that language edition has **no article** on this topic.
-     Tell the user; absence of an article is itself a signal of low coverage.
+**1. Run the analysis**
 
-2. **Fetch pageviews** for the chosen QID:
+```bash
+node <skill-dir>/scripts/cli.ts run "astronomy" --langs uk,pl,cs
+```
 
-   ```bash
-   node scripts/cli.ts fetch --qid Q1666254 --langs pl,cs --months 24
-   ```
+- Topic: short English noun phrase for the concept ("intermittent fasting",
+  "English language", "astronomy"). For a query in another language add
+  `--search-lang uk` (etc.).
+- `--langs`: Wikipedia codes (see below). Default range: last 24 complete months.
+  Use `--months 36` or `--from 2023-01 --to 2025-12` if the user asks.
+- Check `topic.description` matches what the user meant. If not, pick from
+  `otherMeanings` and rerun with `--qid`.
 
-   Options: `--from 2024-01 --to 2025-12` instead of `--months`;
-   `--granularity daily` for short windows (spikes, events).
-   Default is the last 24 complete months, monthly.
+Other statuses, stop and handle:
+- `ambiguous`: several meanings (e.g. "Mercury": planet / element / god). Pick
+  by `description` if the user's intent is clear, otherwise ask. Rerun with `--qid`.
+- `not_found`: try the English term, a synonym, or `--search-lang`.
+- `no_articles`: none of the languages cover it. Suggest a broader topic.
 
-   Output is a summary plus `dataset`: the path of a JSON file with every data
-   point. Pass that path to later steps instead of refetching. Results are cached,
-   so rerunning with other languages or ranges is cheap.
+**2. Write the answer and build the report**
 
-3. **Analyze** the dataset:
+Write 2-4 sentences that answer the user's actual question (e.g. "should we
+launch this course?", "which language next?"). Use only numbers from the `run`
+output; rounding is fine. Mention confidence and the most important caveat.
 
-   ```bash
-   node scripts/cli.ts analyze --dataset <dataset path from fetch>
-   ```
+```bash
+node <skill-dir>/scripts/cli.ts report --analysis <analysis path> \
+  --question "<the user's question>" \
+  --summary "<your 2-4 sentences>"
+```
 
-   Per language you get `verdict` (one line, quote it), `direction`,
-   `confidence`, `caveats`, `spikes`, plus `comparison` across languages.
+If the summary is rejected, the error lists `unsupported` numbers and the
+`allowed` values. Rewrite with allowed values and rerun. Never pass numbers you
+computed yourself.
+
+Then reply to the user with the same answer plus the `pdf` path.
 
 ## Reading the analysis
 
-- Lead with `direction` + `confidence`, then the numbers. Always pass on every
-  item in `caveats`; they are the reasons confidence is not high.
-- `change`: raw human views, last 12 months vs the 12 before (seasonality cancels out).
-- `shareChange`: the same but as a share of all views in that language edition.
-  If it disagrees with `change`, the move is mostly Wikipedia-wide traffic, not the topic.
-- `medianMonthlyChange` and `consistency` ("9/12"): is the change broad-based
-  or a couple of months? Spikes (news, viral moments) are listed in `spikes`.
-- Across languages, rank with `viewsPerMillion` (interest level, size-adjusted)
-  and `change` (momentum). Never rank by raw views.
-- `confidence: low` means "not enough evidence", not "declining". Say what would
-  raise it (longer range, related articles, other data sources).
-- Why the rules are what they are: [references/methodology.md](references/methodology.md).
-  Read it only if the user questions the method.
+- Lead with `direction` + `confidence`, then the numbers. Pass on every item in
+  `caveats`; they are the reasons confidence is not high.
+- `change`: human views, last 12 months vs the 12 before (seasonality cancels out).
+- `shareChange`: same, as a share of all views in that language edition. If it
+  disagrees with `change`, the move is mostly Wikipedia-wide traffic, not the topic.
+- `medianMonthlyChange`, `consistency` ("9/12"): broad-based change or a couple of
+  months? News/viral months appear in `spikes`.
+- Across languages: `viewsPerMillion` = interest level adjusted for edition size;
+  `change` = momentum. Never rank by raw views.
+- `missingLangs`: no article in that language. Say so; it means low coverage, not zero demand.
+- `confidence: low` means "not enough evidence", not "declining".
+- Method details: [references/methodology.md](references/methodology.md). Read
+  only if the user questions the method.
+
+## Follow-up questions
+
+Data is cached, so reruns are cheap. Reuse the `qid` from the previous output:
+
+- Other languages or range: `run --qid Q333 --langs de,fr --months 36`
+- Short event window: `fetch --qid Q333 --langs uk --from 2025-01 --to 2025-03 --granularity daily`,
+  then `analyze --dataset <path>`
+- Several related topics (e.g. "astronomy" and "astrophysics"): one `run` per topic,
+  then compare their `change` and `viewsPerMillion` in your answer.
 
 ## Language codes
 
-Wikipedia codes, not country codes: `uk` Ukrainian, `pl` Polish, `cs` Czech,
-`en` English, `de` German, `es` Spanish, `pt` Portuguese, `ja` Japanese.
-Language editions do not map cleanly to countries (e.g. `en`, `es`, `pt` are
-multi-country, and many Ukrainians also read `ru`/`en`).
+Wikipedia codes, not country codes: `en` English, `uk` Ukrainian, `pl` Polish,
+`cs` Czech, `de` German, `fr` French, `es` Spanish, `it` Italian, `pt` Portuguese,
+`ro` Romanian, `tr` Turkish, `ja` Japanese, `ko` Korean, `ar` Arabic, `hi` Hindi.
+A language is not a country: `en`, `es`, `pt`, `ar` span many countries, and
+many people read another language's Wikipedia. Max 8 languages per report.
 
-## Data caveats to state in answers
+## Data caveats to state when relevant
 
-- Views are human traffic (`agent=user`) to the exact article title. Redirects
-  and other articles on the same subject are not counted.
+- Human traffic (`agent=user`) to the exact article; redirects and related
+  articles are not counted.
 - Pageviews measure curiosity, not willingness to pay.
-- Raw view counts are not comparable across languages of different size:
-  `languageEditionTotalViews` in the fetch summary gives the scale.
+- Search engines and AI assistants increasingly answer questions directly,
+  lowering Wikipedia visits for many topics; `shareChange` only partly corrects this.
