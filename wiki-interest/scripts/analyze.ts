@@ -45,6 +45,13 @@ export interface LangAnalysis {
   medianMonthlyChange: number | null;
   /** Same-month comparisons that moved in the overall direction, e.g. "9/12". */
   consistency: string | null;
+  /**
+   * With 3+ years of data: views per full 12-month block, oldest first, so a
+   * "last 3 years" question isn't answered with a 2-year comparison.
+   */
+  yearly: { from: string; to: string; views: number }[] | null;
+  /** Change from the oldest to the newest 12-month block (only when yearly is set). */
+  multiYearChange: number | null;
   spikes: { period: string; views: number; timesMedian: number }[];
   /** Why confidence is not "high", or other things the reader must know. */
   caveats: string[];
@@ -178,6 +185,18 @@ export function analyzeLang(input: LangInput): LangAnalysis {
     );
   }
 
+  let yearly: LangAnalysis["yearly"] = null;
+  let multiYearChange: number | null = null;
+  if (article.length >= 36) {
+    yearly = [];
+    for (let end = article.length; end - 12 >= 0; end -= 12) {
+      const block = article.slice(end - 12, end);
+      yearly.unshift({ from: block[0]!.period, to: block.at(-1)!.period, views: sumViews(block) });
+    }
+    const first = yearly[0]!.views;
+    multiYearChange = first > 0 ? round(yearly.at(-1)!.views / first - 1) : null;
+  }
+
   const range = (pts: Point[]) => ({ from: pts[0]?.period ?? "", to: pts.at(-1)?.period ?? "" });
   return {
     direction,
@@ -194,6 +213,8 @@ export function analyzeLang(input: LangInput): LangAnalysis {
     viewsPerMillion: round(recentShare * 1e6, 1),
     medianMonthlyChange: medianMonthlyChange === null ? null : round(medianMonthlyChange),
     consistency,
+    yearly,
+    multiYearChange,
     spikes,
     caveats,
   };

@@ -105,6 +105,22 @@ describe("analyzeLang", () => {
     assert.equal(r.confidence, "low");
   });
 
+  it("adds a per-year breakdown when 3+ years are requested", () => {
+    const values = [...Array(12).fill(1000), ...Array(12).fill(1500), ...Array(12).fill(1200)];
+    const r = analyzeLang({ article: series(values, "2023-09"), project: flatProject(36) });
+    assert.deepEqual(r.yearly?.map((y) => y.views), [12_000, 18_000, 14_400]);
+    assert.equal(r.yearly?.[0]?.from, "2023-09");
+    assert.equal(r.multiYearChange, 0.2);
+    // The headline change still compares the last two years.
+    assert.equal(r.change, -0.2);
+  });
+
+  it("omits the per-year breakdown below 3 years", () => {
+    const r = analyzeLang({ article: series(twoYears(2000, 1.3)), project: flatProject(24) });
+    assert.equal(r.yearly, null);
+    assert.equal(r.multiYearChange, null);
+  });
+
   it("refuses to judge fewer than 6 months", () => {
     assert.throws(() => analyzeLang({ article: series([1, 2, 3]), project: flatProject(3) }), /at least 6 months/);
   });

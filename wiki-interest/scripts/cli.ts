@@ -246,8 +246,14 @@ async function cmdRun(positionals: string[], values: Record<string, string | und
     return;
   }
   const { file, compact } = await analyzeDataset(fetched.file, fetched.dataset);
+  const { topic } = fetched.dataset;
   print({
     status: "ok",
+    // First in the output on purpose: exact-title matches can be the wrong thing
+    // ("learning English" -> a Voice of America program), and only the
+    // description reveals it.
+    measuring: `${topic.label} (${topic.qid}): ${topic.description}`,
+    checkTopic: "Is this the concept the user asked about? If not, rerun with --qid from otherMeanings or a clearer topic phrase before writing anything.",
     analysis: file,
     ...compact,
     ...(alternatives.length ? { otherMeanings: alternatives } : {}),

@@ -21,6 +21,8 @@ function lang(overrides: Partial<LangAnalysis>): LangAnalysis {
     viewsPerMillion: 9.9,
     medianMonthlyChange: -0.618,
     consistency: "11/12",
+    yearly: null,
+    multiYearChange: null,
     spikes: [{ period: "2024-09", views: 4687, timesMedian: 7.7 }],
     caveats: [],
     ...overrides,

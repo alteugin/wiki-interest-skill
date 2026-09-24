@@ -27,7 +27,8 @@ function collect(langs: Record<string, LangAnalysis>, range: { from: string; to:
   const ratios: number[] = [];
   const rs = Object.values(langs);
   for (const r of rs) {
-    for (const v of [r.change, r.shareChange, r.medianMonthlyChange]) if (v !== null) percents.push(v * 100);
+    for (const v of [r.change, r.shareChange, r.medianMonthlyChange, r.multiYearChange]) if (v !== null && v !== undefined) percents.push(v * 100);
+    for (const y of r.yearly ?? []) counts.push(y.views);
     counts.push(r.avgMonthlyViews, r.recentViews, r.priorViews, r.viewsPerMillion);
     for (const s of r.spikes) {
       counts.push(s.views);
