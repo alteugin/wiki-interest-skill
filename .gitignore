@@ -1,0 +1,5 @@
+node_modules/
+.cache/
+wiki-interest-output/
+.DS_Store
+.env
